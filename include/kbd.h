@@ -13,16 +13,16 @@
 #define E0ESC (1 << 6)
 
 // Special keycodes
-#define KEY_HOME 0xE0
-#define KEY_END 0xE1
-#define KEY_UP 0xE2
-#define KEY_DN 0xE3
-#define KEY_LF 0xE4
-#define KEY_RT 0xE5
-#define KEY_PGUP 0xE6
-#define KEY_PGDN 0xE7
-#define KEY_INS 0xE8
-#define KEY_DEL 0xE9
+#define KEY_UP 0xC8
+#define KEY_DN 0xD0
+#define KEY_LF 0xCB
+#define KEY_RT 0xCD
+#define KEY_PGUP 0xC9
+#define KEY_PGDN 0xD1
+#define KEY_HOME 0x97
+#define KEY_END 0xCF
+#define KEY_INS 0xD2
+#define KEY_DEL 0xD3
 
 // C('A') == Control-A
 #define C(x) (x - '@')

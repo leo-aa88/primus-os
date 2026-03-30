@@ -62,23 +62,38 @@ void outw(uint16_t port, uint16_t data)
 
 uint8_t scan(void)
 {
-    unsigned char brk;
-    static uint8_t key = 0;
-    uint8_t read_char = input_bytes(0x60); // keyboard port
-    brk = read_char & 0x80;
-    read_char = read_char & 0x7f;
-    if (brk)
+    static uint8_t e0 = 0;
+    uint8_t sc;
+
+    while ((input_bytes(0x64) & 0x01) == 0)
+        ;
+
+    sc = input_bytes(0x60);
+
+    if (sc == 0xE0)
     {
-        return key = 0;
-    }
-    else if (read_char != key)
-    {
-        return key = read_char;
-    }
-    else
-    {
+        e0 = 1;
         return 0;
     }
+
+    if (e0)
+    {
+        e0 = 0;
+
+        // extended break code
+        if (sc & 0x80)
+            return 0;
+
+        // extended make code
+        return sc | 0x80;
+    }
+
+    // normal break code
+    if (sc & 0x80)
+        return 0;
+
+    // normal make code
+    return sc;
 }
 
 void move_cursor(int row, int col)

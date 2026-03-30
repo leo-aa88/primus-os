@@ -34,6 +34,7 @@ int main(void)
 	char *buff;
 	uint8_t byte;
 	node_t *head = NULL;
+	node_t *history_cursor = NULL;
 
 	terminal_initialize(default_font_color, COLOR_BLACK);
 	terminal_set_colors(COLOR_LIGHT_GREEN, COLOR_BLACK);
@@ -60,6 +61,7 @@ int main(void)
 			{
 				strcpy(buffer, tolower(buffer));
 				insert_at_head(&head, create_new_node(buffer));
+				history_cursor = head;
 
 				if (strlen(buffer) > 0 && strcmp(buffer, "exit") == 0)
 				{
@@ -283,6 +285,23 @@ int main(void)
 				s = ctos(s, c);
 				printk("%s", s);
 				buffer[strlen(buffer) - 1] = '\0';
+			}
+			else if (byte == KEY_UP)
+			{
+				if (history_cursor != NULL)
+				{
+					while (strlen(buffer) > 0)
+					{
+						printk("\b \b");
+						buffer[strlen(buffer) - 1] = '\0';
+					}
+
+					strcpy(buffer, history_cursor->buffer);
+					printk("%s", buffer);
+
+					if (history_cursor->next != NULL)
+						history_cursor = history_cursor->next;
+				}
 			}
 			else
 			{
