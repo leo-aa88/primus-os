@@ -38,7 +38,6 @@ PLEASE, comment on the related issue BEFORE sending a pull request! Thanks. Cont
 
 - Implement unit tests and bechmarks (math functions) <br>
 - Implement memory management <br>
-- Add file system and disk partitioning <br>
 - Add multithreading <br>
 - Implement calculator (parsing of command-line tokens) <br>
 - Implement basic text editor <br>

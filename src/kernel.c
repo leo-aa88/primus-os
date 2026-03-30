@@ -16,6 +16,8 @@
 #include "../include/memory.h"
 #include "../include/shell_history.h"
 #include "../include/calculator.h"
+#include "../include/ata.h"
+#include "../include/fat32.h"
 
 #define DEBUG false
 
@@ -50,6 +52,32 @@ int main(void)
 
 	// initialize heap
 	heap_init();
+	fat32_init();
+
+	uint8_t hist_buf[4096];
+	int bytes = fat32_read_file("HISTORY.TXT", hist_buf, 4096);
+	if (bytes > 0)
+	{
+		// parse lines back into history list
+		char *line = strtok((char *)hist_buf, "\n");
+		while (line != NULL)
+		{
+			if (strlen(line) > 0)
+				insert_at_head(&head, create_new_node(line));
+			line = strtok(NULL, "\n");
+		}
+		// reverse so newest is at head
+		// (insert_at_head reverses order, so loaded history will be backwards)
+		history_cursor = head;
+	}
+
+	// test ATA
+	uint8_t sector[512];
+	ata_read_sector(0, sector);
+	if (sector[510] == 0x55 && sector[511] == 0xAA)
+		printk("\nATA OK - boot signature found\n");
+	else
+		printk("\nATA read failed or no boot signature\n");
 
 	strcpy(&buffer[strlen(buffer)], "");
 	print_prompt();
@@ -62,6 +90,11 @@ int main(void)
 				strcpy(buffer, tolower(buffer));
 				insert_at_head(&head, create_new_node(buffer));
 				history_cursor = head;
+
+				// persist history
+				uint8_t hist_buf[4096];
+				int bytes = serialize_history(head, hist_buf, 4096);
+				fat32_write_file("HISTORY.TXT", hist_buf, bytes);
 
 				if (strlen(buffer) > 0 && strcmp(buffer, "exit") == 0)
 				{

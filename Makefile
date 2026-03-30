@@ -47,13 +47,19 @@ primus-os.iso: primus-os.bin
 install: primus-os.bin
 	sudo cp $< /boot/primus-os.bin
 
+create-disk:
+	dd if=/dev/zero of=disk.img bs=1M count=64
+	mkfs.fat -F32 disk.img
+	echo 'drive c: file="disk.img"' > ~/.mtoolsrc
+	echo "" | mcopy - c:/HISTORY.TXT
+
 check_dir:
 	if [ ! -d "$(OBJ_DIR)" ]; then \
 		mkdir -p $(OBJ_DIR); \
 	fi
 
 run-qemu:
-	qemu-system-i386 -kernel primus-os.bin -serial stdio -display gtk
+	qemu-system-i386 -kernel primus-os.bin -serial stdio -drive file=disk.img,format=raw
 
 clean:
 	rm -rf *.o primus-os primus-os.iso primus-os.bin $(OBJ_DIR)/*.o iso
