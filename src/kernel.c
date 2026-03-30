@@ -46,7 +46,6 @@ int main(void)
 	printk("\n\tType \"help\" for a list of commands.\n\n");
 	printk("\tCurrent datetime: ");
 	datetime();
-	printk("\n\tWelcome!\n\n");
 
 	terminal_set_colors(default_font_color, COLOR_BLACK);
 
@@ -75,9 +74,9 @@ int main(void)
 	uint8_t sector[512];
 	ata_read_sector(0, sector);
 	if (sector[510] == 0x55 && sector[511] == 0xAA)
-		printk("\nATA OK - boot signature found\n");
+		printk("ATA OK - boot signature found\n");
 	else
-		printk("\nATA read failed or no boot signature\n");
+		printk("ATA read failed or no boot signature\n");
 
 	strcpy(&buffer[strlen(buffer)], "");
 	print_prompt();
