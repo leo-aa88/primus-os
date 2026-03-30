@@ -42,5 +42,6 @@ uint32_t atoi(const char *str);
 double atof(char *str);
 char *ftoa(char *buf, float f, int precision);
 char* strtok(char* str, const char* delim);
+int isdigit(char c);
 
 #endif

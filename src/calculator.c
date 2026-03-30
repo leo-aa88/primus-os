@@ -17,7 +17,7 @@ void calc_push(double val) {
 double calc_pop() {
     if(calc_top < 0) {
         printk("Stack underflow\n");
-        return;
+        return 0.0;
     }
     return calc_stack[calc_top--];
 }

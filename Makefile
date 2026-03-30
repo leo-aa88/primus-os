@@ -16,11 +16,6 @@ OBJ_FILES2=$(patsubst $(SRC_DIR)/%.s, $(OBJ_DIR)/%.o, $(SRC_FILES2))
 SRC_FILES3=$(wildcard $(SRC_DIR)/*.asm)
 OBJ_FILES3=$(patsubst $(SRC_DIR)/%.asm, $(OBJ_DIR)/%.o, $(SRC_FILES3))
 
-check_dir:
-	if [ ! -d "$(OBJ_DIR)" ]; then \
-		mkdir -p $(OBJ_DIR); \
-	fi
-
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(GCCPARAMS) $^ -I$(HDR_DIR) -c -o $@
 
@@ -51,6 +46,14 @@ primus-os.iso: primus-os.bin
 
 install: primus-os.bin
 	sudo cp $< /boot/primus-os.bin
+
+check_dir:
+	if [ ! -d "$(OBJ_DIR)" ]; then \
+		mkdir -p $(OBJ_DIR); \
+	fi
+
+run-qemu:
+	qemu-system-i386 -kernel primus-os.bin -serial stdio -display gtk
 
 clean:
 	rm -rf *.o primus-os primus-os.iso primus-os.bin $(OBJ_DIR)/*.o iso

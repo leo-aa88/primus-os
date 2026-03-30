@@ -50,30 +50,6 @@ int main(void)
 	// initialize heap
 	heap_init();
 
-#if DEBUG
-	// memory test
-	int *a = (int *)kmalloc(sizeof(int));
-	void *b = kmalloc(5000);
-	void *c = kmalloc(50000);
-	*a = 1;
-	printf("\na: %d", *a);
-	printf("\na: %p", (void *)a);
-	printf("\nb: %p", (void *)b);
-	printf("\nc: %p", (void *)c);
-	// int *b = (int *)kmalloc(0x1000);
-	// int *c = (int *)kmalloc(sizeof(int));
-	// printf("\nb: %x", b);
-	// printf("\nc: %x", c);
-	// kfree(b);
-	// int *d = (int *)kmalloc(0x1000); // here should be adress of B
-	// printf("\nd: %x", d);
-	// kfree(d);
-	// kfree(c);
-	kfree(a);
-	kfree(b);
-	kfree(c);
-#endif
-
 	strcpy(&buffer[strlen(buffer)], "");
 	print_prompt();
 	while (true)
@@ -281,7 +257,7 @@ int main(void)
 				{
 					print_history(head);
 				}
-				else if (strlen(buffer) > 0 && (strstr(buffer, "+") != NULL || strstr(buffer, "-") != NULL || strstr(buffer, "*") != NULL|| strstr(buffer, "/") != NULL ))
+				else if (strlen(buffer) > 0 && (strstr(buffer, "+") != NULL || strstr(buffer, "-") != NULL || strstr(buffer, "*") != NULL || strstr(buffer, "/") != NULL))
 				{
 					compute(buffer);
 				}

@@ -52,3 +52,6 @@ Mkfile.old
 dkms.conf
 
 .vscode
+
+primus-os.bin
+primus-os.iso
