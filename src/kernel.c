@@ -42,8 +42,8 @@ int main(void)
 	print_logo();
 	about(current_version);
 	printk("\n\tType \"help\" for a list of commands.\n\n");
-	// printf("\tCurrent datetime: ");
-	// datetime();
+	printk("\tCurrent datetime: ");
+	datetime();
 	printk("\n\tWelcome!\n\n");
 
 	terminal_set_colors(default_font_color, COLOR_BLACK);

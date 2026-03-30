@@ -4,8 +4,6 @@
 
 #include "stdint.h"
 
-#define CURRENT_YEAR 2022
-
 #define RTCaddress 0x0070
 #define RTCdata 0x0071
 
@@ -29,459 +27,187 @@
 #define CMOS_STATUS_D 0x0d
 #define CMOS_RESET_CODE 0x0f
 
-uint8_t get_update_in_progress_flag()
+// Holds a complete snapshot of all RTC fields
+typedef struct
 {
-    output_bytes(RTCaddress, 0x0A);
+    uint32_t seconds;
+    uint32_t minutes;
+    uint32_t hours;
+    uint32_t day;
+    uint32_t month;
+    uint32_t year;
+    uint32_t registerB;
+} rtc_time_t;
+
+uint8_t get_update_in_progress_flag(void)
+{
+    output_bytes(RTCaddress, NMI_DISABLE_BIT | CMOS_STATUS_A);
     return (input_bytes(RTCdata) & 0x80);
 }
 
 uint32_t get_RTC_register(uint8_t reg)
 {
-    output_bytes(RTCaddress, reg);
+    output_bytes(RTCaddress, NMI_DISABLE_BIT | reg);
     return input_bytes(RTCdata);
 }
 
-void datetime()
+/*
+ * Read all RTC registers atomically using a double-read consistency check.
+ *
+ * The update-in-progress flag has a race window: the RTC can begin an update
+ * after we check the flag but before we finish reading registers. The fix is
+ * to read all registers twice and retry until both reads agree.
+ */
+static void read_rtc(rtc_time_t *t)
 {
-    uint32_t seconds;
-    uint32_t minutes;
-    uint32_t hours;
-    uint32_t day;
-    uint32_t month;
-    uint32_t year;
-    char current_datetime[22] = "";
-    uint32_t registerB;
+    rtc_time_t prev;
 
-    memset(current_datetime, 0, strlen(current_datetime));
-
-start:
-    while (get_update_in_progress_flag())
+    do
     {
-    }
+        // Wait for any in-progress update to finish before first read
+        while (get_update_in_progress_flag())
+        {
+        }
 
-    seconds = CMOS_RTC_SECONDS;
-    output_bytes(RTCaddress, seconds);
-    seconds = input_bytes(RTCdata);
+        prev.seconds = get_RTC_register(CMOS_RTC_SECONDS);
+        prev.minutes = get_RTC_register(CMOS_RTC_MINUTES);
+        prev.hours = get_RTC_register(CMOS_RTC_HOURS);
+        prev.day = get_RTC_register(CMOS_RTC_DAY_MONTH);
+        prev.month = get_RTC_register(CMOS_RTC_MONTH);
+        prev.year = get_RTC_register(CMOS_RTC_YEAR);
+        prev.registerB = get_RTC_register(CMOS_STATUS_B);
 
-    minutes = CMOS_RTC_MINUTES;
-    output_bytes(RTCaddress, minutes);
-    minutes = input_bytes(RTCdata);
+        // Wait again and re-read
+        while (get_update_in_progress_flag())
+        {
+        }
 
-    hours = CMOS_RTC_HOURS;
-    output_bytes(RTCaddress, hours);
-    hours = input_bytes(RTCdata);
+        t->seconds = get_RTC_register(CMOS_RTC_SECONDS);
+        t->minutes = get_RTC_register(CMOS_RTC_MINUTES);
+        t->hours = get_RTC_register(CMOS_RTC_HOURS);
+        t->day = get_RTC_register(CMOS_RTC_DAY_MONTH);
+        t->month = get_RTC_register(CMOS_RTC_MONTH);
+        t->year = get_RTC_register(CMOS_RTC_YEAR);
+        t->registerB = get_RTC_register(CMOS_STATUS_B);
 
-    day = CMOS_RTC_DAY_MONTH;
-    output_bytes(RTCaddress, day);
-    day = input_bytes(RTCdata);
-
-    month = CMOS_RTC_MONTH;
-    output_bytes(RTCaddress, month);
-    month = input_bytes(RTCdata);
-
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        seconds = (seconds & 0x0F) + ((seconds / 16) * 10);
-        minutes = (minutes & 0x0F) + ((minutes / 16) * 10);
-        hours = ((hours & 0x0F) + (((hours & 0x70) / 16) * 10)) | (hours & 0x80);
-        day = (day & 0x0F) + ((day / 16) * 10);
-        month = (month & 0x0F) + ((month / 16) * 10);
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-
-    // Convert 12 hour clock to 24 hour clock if necessary
-
-    if (!(registerB & 0x02) && (hours & 0x80))
-    {
-        hours = ((hours & 0x7F) + 12) % 24;
-    }
-
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-
-    sprintf(current_datetime, "%u:%u:%u - %u/%u/%u", hours, minutes, seconds, day, month, year);
-    printk("%s\n", current_datetime);
+    } while (
+        prev.seconds != t->seconds ||
+        prev.minutes != t->minutes ||
+        prev.hours != t->hours ||
+        prev.day != t->day ||
+        prev.month != t->month ||
+        prev.year != t->year);
 }
 
-void date()
+/*
+ * Convert raw RTC register values (BCD or binary) to plain binary,
+ * and normalise hours to 24-hour format. Mutates *t in place.
+ */
+static void normalise_rtc(rtc_time_t *t)
 {
-    uint32_t day;
-    uint32_t month;
-    uint32_t year;
-    char current_date[11] = "";
-    uint32_t registerB;
-
-    memset(current_date, 0, strlen(current_date));
-
-start:
-    while (get_update_in_progress_flag())
+    // Convert BCD to binary if the RTC is in BCD mode (bit 2 of status B clear)
+    if (!(t->registerB & 0x04))
     {
+        t->seconds = (t->seconds & 0x0F) + ((t->seconds >> 4) * 10);
+        t->minutes = (t->minutes & 0x0F) + ((t->minutes >> 4) * 10);
+        // Hours: bits 6:4 are the tens digit; bit 7 is the PM flag in 12h mode
+        t->hours = ((t->hours & 0x0F) + (((t->hours & 0x70) >> 4) * 10)) | (t->hours & 0x80);
+        t->day = (t->day & 0x0F) + ((t->day >> 4) * 10);
+        t->month = (t->month & 0x0F) + ((t->month >> 4) * 10);
+        t->year = (t->year & 0x0F) + ((t->year >> 4) * 10);
     }
 
-    day = CMOS_RTC_DAY_MONTH;
-    output_bytes(RTCaddress, day);
-    day = input_bytes(RTCdata);
+    // Convert 12-hour to 24-hour if necessary (bit 1 of status B clear = 12h mode)
+    if (!(t->registerB & 0x02) && (t->hours & 0x80))
+        t->hours = ((t->hours & 0x7F) + 12) % 24;
 
-    month = CMOS_RTC_MONTH;
-    output_bytes(RTCaddress, month);
-    month = input_bytes(RTCdata);
-
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        day = (day & 0x0F) + ((day / 16) * 10);
-        month = (month & 0x0F) + ((month / 16) * 10);
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-
-    sprintf(current_date, "%u/%u/%u", day, month, year);
-    printk("%s\n", current_date);
+    // Expand 2-digit year to full 4-digit year
+    t->year += 2000;
 }
 
-void clock()
+void datetime(void)
 {
-    uint32_t seconds;
-    uint32_t minutes;
-    uint32_t hours;
-    uint32_t year;
-    char current_time[9] = "";
-    uint32_t registerB;
+    rtc_time_t t;
+    char buf[64];
 
-    memset(current_time, 0, strlen(current_time));
+    read_rtc(&t);
+    normalise_rtc(&t);
 
-start:
-    while (get_update_in_progress_flag())
-    {
-    }
-
-    seconds = CMOS_RTC_SECONDS;
-    output_bytes(RTCaddress, seconds);
-    seconds = input_bytes(RTCdata);
-
-    minutes = CMOS_RTC_MINUTES;
-    output_bytes(RTCaddress, minutes);
-    minutes = input_bytes(RTCdata);
-
-    hours = CMOS_RTC_HOURS;
-    output_bytes(RTCaddress, hours);
-    hours = input_bytes(RTCdata);
-
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        seconds = (seconds & 0x0F) + ((seconds / 16) * 10);
-        minutes = (minutes & 0x0F) + ((minutes / 16) * 10);
-        hours = ((hours & 0x0F) + (((hours & 0x70) / 16) * 10)) | (hours & 0x80);
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-
-    // Convert 12 hour clock to 24 hour clock if necessary
-
-    if (!(registerB & 0x02) && (hours & 0x80))
-    {
-        hours = ((hours & 0x7F) + 12) % 24;
-    }
-
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-
-    sprintf(current_time, "%u:%u:%u", hours, minutes, seconds);
-    printk("%s\n", current_time);
+    // Zero-pad all fields for consistent, readable output
+    sprintf(buf, "%02u:%02u:%02u - %02u/%02u/%u",
+            t.hours, t.minutes, t.seconds,
+            t.day, t.month, t.year);
+    printk("%s\n", buf);
 }
 
-uint32_t current_seconds()
+void date(void)
 {
-    uint32_t seconds;
-    uint32_t year;
-    uint32_t registerB;
+    rtc_time_t t;
+    char buf[32];
 
-start:
-    while (get_update_in_progress_flag())
-    {
-    }
+    read_rtc(&t);
+    normalise_rtc(&t);
 
-    seconds = CMOS_RTC_SECONDS;
-    output_bytes(RTCaddress, seconds);
-    seconds = input_bytes(RTCdata);
-
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        seconds = (seconds & 0x0F) + ((seconds / 16) * 10);
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-
-    return seconds;
+    sprintf(buf, "%02u/%02u/%u", t.day, t.month, t.year);
+    printk("%s\n", buf);
 }
 
-uint32_t current_minutes()
+void clock(void)
 {
-    uint32_t minutes;
-    uint32_t year;
-    uint32_t registerB;
+    rtc_time_t t;
+    char buf[32];
 
-start:
-    while (get_update_in_progress_flag())
-    {
-    }
+    read_rtc(&t);
+    normalise_rtc(&t);
 
-    minutes = CMOS_RTC_MINUTES;
-    output_bytes(RTCaddress, minutes);
-    minutes = input_bytes(RTCdata);
-
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        minutes = (minutes & 0x0F) + ((minutes / 16) * 10);
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-
-    return minutes;
+    sprintf(buf, "%02u:%02u:%02u", t.hours, t.minutes, t.seconds);
+    printk("%s\n", buf);
 }
 
-uint32_t current_hour()
+uint32_t current_seconds(void)
 {
-    uint32_t hours;
-    uint32_t year;
-    uint32_t registerB;
-
-start:
-    while (get_update_in_progress_flag())
-    {
-    }
-
-    hours = CMOS_RTC_HOURS;
-    output_bytes(RTCaddress, hours);
-    hours = input_bytes(RTCdata);
-
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        hours = ((hours & 0x0F) + (((hours & 0x70) / 16) * 10)) | (hours & 0x80);
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-
-    // Convert 12 hour clock to 24 hour clock if necessary
-
-    if (!(registerB & 0x02) && (hours & 0x80))
-    {
-        hours = ((hours & 0x7F) + 12) % 24;
-    }
-
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-
-    return hours;
+    rtc_time_t t;
+    read_rtc(&t);
+    normalise_rtc(&t);
+    return t.seconds;
 }
 
-uint32_t current_day()
+uint32_t current_minutes(void)
 {
-    uint32_t day;
-    uint32_t year;
-    uint32_t registerB;
-
-start:
-    while (get_update_in_progress_flag())
-    {
-    }
-
-    day = CMOS_RTC_DAY_MONTH;
-    output_bytes(RTCaddress, day);
-    day = input_bytes(RTCdata);
-
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        day = (day & 0x0F) + ((day / 16) * 10);
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-
-    return day;
+    rtc_time_t t;
+    read_rtc(&t);
+    normalise_rtc(&t);
+    return t.minutes;
 }
 
-uint32_t current_month()
+uint32_t current_hour(void)
 {
-    uint32_t month;
-    uint32_t year;
-    uint32_t registerB;
-
-start:
-    while (get_update_in_progress_flag())
-    {
-    }
-
-    month = CMOS_RTC_MONTH;
-    output_bytes(RTCaddress, month);
-    month = input_bytes(RTCdata);
-
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        month = (month & 0x0F) + ((month / 16) * 10);
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-
-    return month;
+    rtc_time_t t;
+    read_rtc(&t);
+    normalise_rtc(&t);
+    return t.hours;
 }
 
-uint32_t current_year()
+uint32_t current_day(void)
 {
-    uint32_t year;
-    uint32_t registerB;
+    rtc_time_t t;
+    read_rtc(&t);
+    normalise_rtc(&t);
+    return t.day;
+}
 
-start:
-    while (get_update_in_progress_flag())
-    {
-    }
+uint32_t current_month(void)
+{
+    rtc_time_t t;
+    read_rtc(&t);
+    normalise_rtc(&t);
+    return t.month;
+}
 
-    year = CMOS_RTC_YEAR;
-    output_bytes(RTCaddress, year);
-    year = input_bytes(RTCdata);
-
-    registerB = get_RTC_register(0x80);
-
-    // Convert BCD to binary values if necessary
-
-    if (!(registerB & 0x04))
-    {
-        year = (year & 0x0F) + ((year / 16) * 10);
-    }
-
-    // Calculate the full (4-digit) year
-    year += (CURRENT_YEAR / 100) * 100;
-    if (year < CURRENT_YEAR)
-        year += 100;
-
-    if (year != CURRENT_YEAR)
-    {
-        goto start;
-    }
-    return year;
+uint32_t current_year(void)
+{
+    rtc_time_t t;
+    read_rtc(&t);
+    normalise_rtc(&t);
+    return t.year;
 }
